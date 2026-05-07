@@ -134,8 +134,7 @@ export default function AdminPage() {
     </div>
   );
 
-  if (profile?.role !== 'admin') return null;
-
+  if ((profile?.role as string) !== 'admin') return null;
   return (
     <div className="min-h-screen pb-32">
       <header className="px-5 pt-8 pb-4 max-w-2xl mx-auto">
