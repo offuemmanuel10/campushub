@@ -205,7 +205,7 @@ export default function AdminPage() {
               ) : verifiedUsers.map(u => {
                 const expiresAt = u.verificationExpiresAt?.toDate?.();
                 const daysLeft = expiresAt
-                  ? Math.ceil((expiresAt - new Date()) / (1000 * 60 * 60 * 24))
+                  ? Math.ceil((expiresAt.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
                   : null;
                 const isExpiringSoon = daysLeft !== null && daysLeft <= 5;
                 const isExpired = daysLeft !== null && daysLeft <= 0;
