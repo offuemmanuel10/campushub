@@ -75,7 +75,7 @@ export default function ProfilePage() {
         verificationStatus: 'pending',
         verificationRequestedAt: new Date()
       });
-      setProfile({ ...profile, verificationStatus: 'pending' });
+      setProfile({ ...profile, verificationStatus: 'pending' } as any);
       alert('Verification request sent! An admin will review your profile.');
     } catch (error) { console.error(error); }
     finally { setRequesting(false); }
@@ -91,8 +91,8 @@ export default function ProfilePage() {
       specialServices: profile?.specialServices || '',
       catalogUrl: profile?.catalogUrl || '',
     });
-    const existing: CatalogDraft[] = (profile?.catalogItems || []).map((item: CatalogItem) => ({
-      file: null,
+ const existing: CatalogDraft[] = ((profile?.catalogItems as CatalogItem[]) || []).map((item: CatalogItem) => ({
+  file: null,
       preview: item.mediaUrl,
       caption: item.caption || '',
       price: item.price || '',
@@ -192,8 +192,7 @@ export default function ProfilePage() {
 
   if (!profile) return null;
 
-  const catalogItems: CatalogItem[] = profile.catalogItems || [];
-
+ const catalogItems: CatalogItem[] = (profile.catalogItems as CatalogItem[]) || [];
   return (
     <div className="min-h-screen pb-32">
       <header className="px-5 pt-8 pb-4 max-w-2xl mx-auto flex items-center justify-between">
@@ -505,10 +504,10 @@ export default function ProfilePage() {
               )}
               {!profile.isVerified && (
                 <button onClick={handleRequestVerification}
-                  disabled={requesting || profile.verificationStatus === 'pending'}
+                  disabled={requesting || (profile as any).verificationStatus === 'pending'}
                   className="w-full mt-5 py-3 rounded-[0.875rem] font-semibold transition-all flex items-center justify-center gap-2"
                   style={{ background: 'var(--color-accent-soft)', color: 'var(--color-accent)' }}>
-                  {profile.verificationStatus === 'pending'
+                  {(profile as any).verificationStatus === 'pending'
                     ? <><Clock className="w-4 h-4" /> Verification Requested</>
                     : requesting ? 'Requesting...' : 'Request verification'}
                 </button>

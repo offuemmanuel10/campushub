@@ -686,13 +686,13 @@ export function Marketplace() {
 
   // Interleave ad rows every AD_INTERVAL posts
   const renderFeed = () => {
-  const items: JSX.Element[] = [];
+const items: React.JSX.Element[] = []
   filteredProducts.forEach((product, index) => {
     items.push(
       <PostCard
         key={product.id}
         product={product}
-        canDelete={user?.uid === product.vendorId || profile?.role === 'admin'}
+       canDelete={user?.uid === product.vendorId || (profile?.role as string) === 'admin'}
         onDelete={() => setDeleteId(product.id)}
         currentUser={user}
         profile={profile}
