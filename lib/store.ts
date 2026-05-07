@@ -4,7 +4,7 @@ import { User as FirebaseUser } from 'firebase/auth';
 export interface UserProfile {
   uid: string;
   email: string;
-  role: 'buyer' | 'vendor';
+  role: 'buyer' | 'vendor' | 'admin';
   name: string;
   photoUrl?: string;
   bio?: string;
@@ -15,6 +15,11 @@ export interface UserProfile {
   catalogUrl?: string;
   contactLinks?: { title: string; url: string }[];
   specialServices?: string;
+  catalogItems?: any[];
+  verificationStatus?: string;
+  verificationRequestedAt?: any;
+  verifiedAt?: any;
+  verificationExpiresAt?: any;
 }
 
 interface AuthState {
