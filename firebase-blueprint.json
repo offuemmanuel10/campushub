@@ -1,0 +1,48 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the Campus Hub platform, either a buyer or a vendor.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The unique identifier of the user (Firebase Auth UID)." },
+        "email": { "type": "string", "format": "email", "description": "The user's email address." },
+        "role": { "type": "string", "enum": ["buyer", "vendor"], "description": "The role of the user." },
+        "name": { "type": "string", "description": "The user's full name." },
+        "photoUrl": { "type": "string", "format": "uri", "description": "Optional URL to the user's profile photo." },
+        "bio": { "type": "string", "description": "Optional biography for the user." },
+        "shopName": { "type": "string", "description": "Optional shop name, required for vendors." },
+        "shopDescription": { "type": "string", "description": "Optional shop description, required for vendors." },
+        "isVerified": { "type": "boolean", "description": "Whether the vendor has requested and received verification." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the user profile was created." }
+      },
+      "required": ["uid", "email", "role", "name", "createdAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "A product listed for sale by a vendor.",
+      "type": "object",
+      "properties": {
+        "vendorId": { "type": "string", "description": "The UID of the vendor who created the product." },
+        "vendorName": { "type": "string", "description": "The name of the vendor." },
+        "name": { "type": "string", "description": "The name of the product." },
+        "description": { "type": "string", "description": "A detailed description of the product." },
+        "price": { "type": "number", "description": "The price of the product." },
+        "category": { "type": "string", "description": "The category of the product." },
+        "imageUrl": { "type": "string", "format": "uri", "description": "The URL of the product image." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the product was listed." }
+      },
+      "required": ["vendorId", "vendorName", "name", "description", "price", "category", "imageUrl", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles."
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Stores product listings."
+    }
+  }
+}

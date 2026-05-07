@@ -1,0 +1,107 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function hasOnlyAllowedFields(allowedFields) {
+      return request.resource.data.keys().hasOnly(allowedFields);
+    }
+    
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    
+    function isValidUser(data) {
+      let allowedFields = ['uid', 'email', 'role', 'name', 'photoUrl', 'bio', 'shopName', 'shopDescription', 'isVerified', 'createdAt', 'catalogUrl', 'contactLinks', 'specialServices'];
+      
+      return hasOnlyAllowedFields(allowedFields) &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.email is string && isValidEmail(data.email) &&
+             data.role in ['buyer', 'vendor'] &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             (!('photoUrl' in data) || isValidUrl(data.photoUrl)) &&
+             (!('bio' in data) || (data.bio is string && data.bio.size() <= 500)) &&
+             (!('shopName' in data) || (data.shopName is string && data.shopName.size() <= 100)) &&
+             (!('shopDescription' in data) || (data.shopDescription is string && data.shopDescription.size() <= 1000)) &&
+             (!('catalogUrl' in data) || data.catalogUrl is string) &&
+             (!('contactLinks' in data) || data.contactLinks is list) &&
+             (!('specialServices' in data) || (data.specialServices is string && data.specialServices.size() <= 1000)) &&
+             (data.isVerified is bool) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidProduct(data) {
+      let allowedFields = ['vendorId', 'vendorName', 'name', 'description', 'price', 'category', 'imageUrl', 'mediaUrls', 'createdAt'];
+      
+      return hasOnlyAllowedFields(allowedFields) &&
+             data.vendorId is string && data.vendorId == request.auth.uid &&
+             data.vendorName is string && data.vendorName.size() > 0 && data.vendorName.size() <= 100 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.description is string && data.description.size() > 0 && data.description.size() <= 2000 &&
+             data.price is number && data.price >= 0 &&
+             data.category is string && data.category.size() > 0 && data.category.size() <= 50 &&
+             (!('imageUrl' in data) || isValidUrl(data.imageUrl)) &&
+             (!('mediaUrls' in data) || (data.mediaUrls is list && data.mediaUrls.size() <= 10)) &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Users can read any profile (public profiles needed for marketplace)
+      allow read: if isAuthenticated();
+      
+      // Users can only create/update their own profile
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) &&
+                    // Cannot change uid or email
+                    request.resource.data.uid == resource.data.uid &&
+                    request.resource.data.email == resource.data.email &&
+                    request.resource.data.createdAt == resource.data.createdAt;
+                    
+      allow delete: if isOwner(userId);
+    }
+
+    match /products/{productId} {
+      // Anyone authenticated can read products
+      allow read: if isAuthenticated();
+      
+      // Any authenticated user can create products
+      allow create: if isAuthenticated() && 
+                    isValidProduct(request.resource.data);
+                    
+      // Only the vendor who created the product can update it
+      allow update: if isAuthenticated() && 
+                    resource.data.vendorId == request.auth.uid &&
+                    isValidProduct(request.resource.data) &&
+                    request.resource.data.vendorId == resource.data.vendorId &&
+                    request.resource.data.createdAt == resource.data.createdAt;
+                    
+      // Only the vendor who created the product can delete it
+      allow delete: if isAuthenticated() && resource.data.vendorId == request.auth.uid;
+    }
+  }
+}
