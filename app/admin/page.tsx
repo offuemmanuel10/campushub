@@ -24,7 +24,7 @@ export default function AdminPage() {
 
   // Redirect non-admins
   useEffect(() => {
-    if (profile && profile.role !== 'admin') router.push('/');
+   if (profile && (profile.role as string) !== 'admin') router.push('/');
   }, [profile]);
 
   useEffect(() => {
