@@ -13,7 +13,7 @@ export function BottomNav() {
     { name: 'Home', href: '/', icon: Home },
     { name: 'Search', href: '/search', icon: Search },
     { name: 'Sell', href: '/create-listing', icon: PlusSquare, primary: true },
-    { name: 'Top Brands', href: '/brands', icon: BadgeCheck },
+    { name: 'Brands', href: '/brands', icon: BadgeCheck },
     { name: 'Profile', href: '/profile', icon: User },
   ];
 

@@ -9,7 +9,7 @@ import { ArrowLeft, Upload, X, AlertCircle, BadgeCheck } from 'lucide-react';
 import Link from 'next/link';
 
 const CATEGORIES = ['Housing', 'Events', 'Electronics', 'Clothing', 'Services', 'Other'];
-const MAX_FILE_SIZE_MB = 50;
+const MAX_TOTAL_MB = 50;
 const MAX_FILES = 10;
 const CLOUD_NAME = 'dqkcav8ep';
 const UPLOAD_PRESET = 'marketplace_uploads';
@@ -19,13 +19,26 @@ async function uploadToCloudinary(file: File, folder: string): Promise<string> {
   formData.append('file', file);
   formData.append('upload_preset', UPLOAD_PRESET);
   formData.append('folder', folder);
-  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`, {
-    method: 'POST',
-    body: formData,
-  });
+
+  const resourceType = file.type.startsWith('video/') ? 'video' : 'image';
+
+  const res = await fetch(
+    `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/${resourceType}/upload`,
+    { method: 'POST', body: formData }
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error?.message || `Upload failed (${res.status})`);
+  }
+
   const data = await res.json();
-  if (!data.secure_url) throw new Error('Upload failed');
+  if (!data.secure_url) throw new Error('Upload failed — no URL returned');
   return data.secure_url;
+}
+
+function getTotalMB(files: File[]): number {
+  return files.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024);
 }
 
 export default function CreateListing() {
@@ -37,13 +50,15 @@ export default function CreateListing() {
   const [category, setCategory] = useState(CATEGORIES[0]);
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
   const [error, setError] = useState('');
   const [fileError, setFileError] = useState('');
 
   if (!profile) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
-        <div className="size-8 border-4 rounded-full animate-spin" style={{ borderColor: 'var(--color-muted)', borderTopColor: 'var(--color-primary)' }} />
+        <div className="size-8 border-4 rounded-full animate-spin"
+          style={{ borderColor: 'var(--color-muted)', borderTopColor: 'var(--color-primary)' }} />
       </div>
     );
   }
@@ -52,23 +67,29 @@ export default function CreateListing() {
     setFileError('');
     if (!e.target.files) return;
     const incoming = Array.from(e.target.files);
-    const oversized = incoming.filter(f => f.size > MAX_FILE_SIZE_MB * 1024 * 1024);
-    if (oversized.length > 0) {
-      setFileError(`${oversized.map(f => f.name).join(', ')} exceed${oversized.length === 1 ? 's' : ''} the ${MAX_FILE_SIZE_MB}MB limit.`);
+    const combined = [...files, ...incoming];
+
+    if (combined.length > MAX_FILES) {
+      setFileError(`Max ${MAX_FILES} files allowed.`);
+      e.target.value = '';
       return;
     }
-    setFiles(prev => {
-      const combined = [...prev, ...incoming];
-      if (combined.length > MAX_FILES) {
-        setFileError(`Max ${MAX_FILES} files allowed.`);
-        return prev;
-      }
-      return combined;
-    });
+
+    const totalMB = getTotalMB(combined);
+    if (totalMB > MAX_TOTAL_MB) {
+      setFileError(`Total size exceeds ${MAX_TOTAL_MB}MB. Current total: ${totalMB.toFixed(1)}MB.`);
+      e.target.value = '';
+      return;
+    }
+
+    setFiles(combined);
     e.target.value = '';
   };
 
-  const removeFile = (index: number) => setFiles(prev => prev.filter((_, i) => i !== index));
+  const removeFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+    setFileError('');
+  };
 
   const checkDailyLimit = async (): Promise<boolean> => {
     if (profile.isVerified) return true;
@@ -94,6 +115,7 @@ export default function CreateListing() {
 
     setLoading(true);
     setError('');
+    setUploadProgress('');
 
     try {
       const canPost = await checkDailyLimit();
@@ -104,10 +126,18 @@ export default function CreateListing() {
       }
 
       const mediaUrls: string[] = [];
-      for (const file of files) {
-        const url = await uploadToCloudinary(file, `products/${user.uid}`);
-        mediaUrls.push(url);
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setUploadProgress(`Uploading ${i + 1} of ${files.length}...`);
+        try {
+          const url = await uploadToCloudinary(file, `products/${user.uid}`);
+          mediaUrls.push(url);
+        } catch (uploadErr: any) {
+          throw new Error(`Failed to upload "${file.name}": ${uploadErr.message}`);
+        }
       }
+
+      setUploadProgress('Publishing...');
 
       const productData: any = {
         vendorId: user.uid,
@@ -118,6 +148,7 @@ export default function CreateListing() {
         description: description.trim(),
         category,
         mediaUrls,
+        likes: [],
         createdAt: serverTimestamp(),
       };
 
@@ -127,18 +158,22 @@ export default function CreateListing() {
       await addDoc(collection(db, 'products'), productData);
       router.push('/');
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
+      setUploadProgress('');
     }
   };
+
+  const totalMB = getTotalMB(files);
 
   return (
     <div className="min-h-screen pb-32">
       <header className="px-5 py-4 sticky top-0 z-40 backdrop-blur"
         style={{ background: 'rgba(250,250,247,0.85)', borderBottom: '1px solid var(--color-border)' }}>
         <div className="max-w-2xl mx-auto flex items-center gap-4">
-          <Link href="/" className="size-10 rounded-full flex items-center justify-center hover:bg-[color:var(--color-muted)]">
+          <Link href="/"
+            className="size-10 rounded-full flex items-center justify-center hover:bg-[color:var(--color-muted)]">
             <ArrowLeft className="w-5 h-5" />
           </Link>
           <div>
@@ -157,9 +192,10 @@ export default function CreateListing() {
             <div>
               <p className="text-sm font-semibold">You are unverified</p>
               <p className="text-xs mt-0.5 leading-relaxed opacity-90">
-                Unverified accounts can only post once per day. Verify your account for higher limits and a badge on your posts.
+                Unverified accounts can only post once per day. Go to your profile to verify your account for higher limits and a verified icon badge on your posts.
               </p>
-              <Link href="/profile" className="inline-flex items-center gap-1 text-xs font-bold mt-2 underline underline-offset-2">
+              <Link href="/profile"
+                className="inline-flex items-center gap-1 text-xs font-bold mt-2 underline underline-offset-2">
                 <BadgeCheck className="w-3.5 h-3.5" /> Request verification
               </Link>
             </div>
@@ -175,9 +211,10 @@ export default function CreateListing() {
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="card p-5 space-y-5">
-
             <div>
-              <label className="label">Description <span className="font-normal text-[color:var(--color-muted-foreground)] normal-case tracking-normal">· required</span></label>
+              <label className="label">
+                Description <span className="font-normal text-[color:var(--color-muted-foreground)] normal-case tracking-normal">· required</span>
+              </label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -187,35 +224,26 @@ export default function CreateListing() {
             </div>
 
             <div>
-              <label className="label">Product name <span className="font-normal text-[color:var(--color-muted-foreground)] normal-case tracking-normal">· optional</span></label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="input-field"
-                placeholder="What are you selling?"
-              />
+              <label className="label">
+                Product name <span className="font-normal text-[color:var(--color-muted-foreground)] normal-case tracking-normal">· optional</span>
+              </label>
+              <input type="text" value={name} onChange={(e) => setName(e.target.value)}
+                className="input-field" placeholder="What are you selling?" />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="label">Price <span className="font-normal text-[color:var(--color-muted-foreground)] normal-case tracking-normal">· optional</span></label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[color:var(--color-muted-foreground)] font-medium">₦</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    className="input-field pl-8"
-                    placeholder="0.00"
-                  />
-                </div>
+                <label className="label">
+                  Price (₦) <span className="font-normal text-[color:var(--color-muted-foreground)] normal-case tracking-normal">· optional</span>
+                </label>
+                <input type="number" step="0.01" min="0" value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  className="input-field" placeholder="0.00" />
               </div>
               <div>
                 <label className="label">Category</label>
-                <select value={category} onChange={(e) => setCategory(e.target.value)} className="input-field bg-white">
+                <select value={category} onChange={(e) => setCategory(e.target.value)}
+                  className="input-field bg-white">
                   {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                 </select>
               </div>
@@ -224,24 +252,29 @@ export default function CreateListing() {
 
           {/* Media */}
           <div className="card p-5">
-            <label className="label">
-              Media <span className="font-normal text-[color:var(--color-muted-foreground)] normal-case tracking-normal">· optional, up to {MAX_FILES} files, {MAX_FILE_SIZE_MB}MB each</span>
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label mb-0">
+                Media <span className="font-normal text-[color:var(--color-muted-foreground)] normal-case tracking-normal">· optional</span>
+              </label>
+              {files.length > 0 && (
+                <span className={`text-xs font-medium ${totalMB > MAX_TOTAL_MB * 0.9 ? 'text-orange-500' : 'text-[color:var(--color-muted-foreground)]'}`}>
+                  {totalMB.toFixed(1)}MB / {MAX_TOTAL_MB}MB
+                </span>
+              )}
+            </div>
 
             <label className="block w-full cursor-pointer rounded-2xl border-2 border-dashed py-8 px-6 text-center transition-all hover:border-[color:var(--color-primary)] hover:bg-[color:var(--color-muted)]"
               style={{ borderColor: 'var(--color-border)' }}>
-              <div className="size-12 mx-auto mb-3 rounded-2xl flex items-center justify-center" style={{ background: 'var(--color-muted)' }}>
+              <div className="size-12 mx-auto mb-3 rounded-2xl flex items-center justify-center"
+                style={{ background: 'var(--color-muted)' }}>
                 <Upload className="w-5 h-5" style={{ color: 'var(--color-primary)' }} />
               </div>
               <p className="font-medium text-sm mb-1">Tap to add photos or videos</p>
-              <p className="text-xs text-[color:var(--color-muted-foreground)]">PNG, JPG, MP4, MOV — max {MAX_FILE_SIZE_MB}MB per file</p>
-              <input
-                type="file"
-                multiple
-                accept="image/*,video/*"
-                className="sr-only"
-                onChange={handleFileChange}
-              />
+              <p className="text-xs text-[color:var(--color-muted-foreground)]">
+                PNG, JPG, MP4, MOV — max {MAX_TOTAL_MB}MB total across all files
+              </p>
+              <input type="file" multiple accept="image/*,video/*" className="sr-only"
+                onChange={handleFileChange} />
             </label>
 
             {fileError && (
@@ -251,23 +284,26 @@ export default function CreateListing() {
             {files.length > 0 && (
               <div className="mt-4 flex flex-col gap-3">
                 {files.map((file, index) => (
-                  <div key={index} className="relative rounded-xl overflow-hidden" style={{ background: 'var(--color-muted)' }}>
+                  <div key={index} className="relative rounded-xl overflow-hidden"
+                    style={{ background: 'var(--color-muted)' }}>
                     {file.type.startsWith('video/') ? (
-                      <video src={URL.createObjectURL(file)} className="w-full h-auto" />
+                      <video
+                        src={URL.createObjectURL(file)}
+                        className="w-full h-auto"
+                        controls
+                        playsInline
+                      />
                     ) : (
-                      <img src={URL.createObjectURL(file)} alt="preview" className="w-full h-auto" />
+                      <img src={URL.createObjectURL(file)} alt="preview"
+                        className="w-full h-auto" />
                     )}
-                    <button
-                      type="button"
-                      onClick={() => removeFile(index)}
-                      className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1 hover:bg-black/80">
+                    <button type="button" onClick={() => removeFile(index)}
+                      className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1.5 hover:bg-black/80 z-10">
                       <X className="w-3 h-3" />
                     </button>
-                    {file.type.startsWith('video/') && (
-                      <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-md bg-black/60 text-white text-[10px] font-medium">
-                        VID
-                      </div>
-                    )}
+                    <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded-md bg-black/60 text-white text-[10px] font-medium">
+                      {file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE'} · {(file.size / (1024 * 1024)).toFixed(1)}MB
+                    </div>
                   </div>
                 ))}
               </div>
@@ -278,7 +314,7 @@ export default function CreateListing() {
             {loading ? (
               <span className="flex items-center justify-center gap-2">
                 <span className="size-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                {files.length > 0 ? 'Uploading...' : 'Publishing...'}
+                {uploadProgress || 'Publishing...'}
               </span>
             ) : 'Publish'}
           </button>

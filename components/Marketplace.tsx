@@ -13,14 +13,13 @@ import Image from 'next/image';
 import Link from 'next/link';
 import {
   Trash2, TrendingUp, ChevronLeft, ChevronRight,
-  Tag, BadgeCheck, Sparkles, Heart, MessageCircle,
+  Tag, BadgeCheck, Heart, MessageCircle,
   Send, Bell, X, CornerDownRight, User as UserIcon,
   ArrowRight
 } from 'lucide-react';
 
 const CATEGORIES = ['All', 'Housing', 'Events', 'Electronics', 'Clothing', 'Services', 'Other'];
 const PAGE_SIZE = 10;
-const AD_INTERVAL = 5; // show ad rows every 5 posts
 
 const renderWithLinks = (text: string) => {
   if (!text) return null;
@@ -41,7 +40,6 @@ const renderWithLinks = (text: string) => {
   });
 };
 
-// ── Build comment tree from flat list ──────────────────────────
 function buildTree(comments: any[]): any[] {
   const map: Record<string, any> = {};
   const roots: any[] = [];
@@ -56,7 +54,6 @@ function buildTree(comments: any[]): any[] {
   return roots;
 }
 
-// ── Recursive comment node ─────────────────────────────────────
 function CommentNode({
   comment, depth, productId, currentUser, profile,
   onReply, onDelete, onLike
@@ -119,7 +116,6 @@ function CommentNode({
   );
 }
 
-// ── Comment section ────────────────────────────────────────────
 function CommentSection({ productId, currentUser, profile, onCountChange }: {
   productId: string, currentUser: any, profile: any,
   onCountChange: (count: number) => void
@@ -155,7 +151,6 @@ function CommentSection({ productId, currentUser, profile, onCountChange }: {
         likes: [],
         parentId: replyTo?.id || null,
       });
-      // Send notification
       if (replyTo) {
         const parent = comments.find(c => c.id === replyTo.id);
         if (parent && parent.authorId !== currentUser.uid) {
@@ -187,7 +182,6 @@ function CommentSection({ productId, currentUser, profile, onCountChange }: {
 
   const handleDelete = async (commentId: string, authorId: string) => {
     if (currentUser?.uid !== authorId && profile?.role !== 'admin') return;
-    // Also delete children
     const children = comments.filter(c => c.parentId === commentId);
     await Promise.all(children.map(c => deleteDoc(doc(db, 'products', productId, 'comments', c.id))));
     await deleteDoc(doc(db, 'products', productId, 'comments', commentId));
@@ -200,7 +194,6 @@ function CommentSection({ productId, currentUser, profile, onCountChange }: {
       <p className="text-xs font-semibold uppercase tracking-wider text-[color:var(--color-muted-foreground)] my-3">
         {comments.length} comment{comments.length !== 1 ? 's' : ''}
       </p>
-
       <div className="mb-4">
         {tree.map(comment => (
           <CommentNode key={comment.id} comment={comment} depth={0}
@@ -213,7 +206,6 @@ function CommentSection({ productId, currentUser, profile, onCountChange }: {
             onLike={handleLike} />
         ))}
       </div>
-
       {replyTo && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-xl mb-2 text-xs"
           style={{ background: 'var(--color-muted)' }}>
@@ -224,7 +216,6 @@ function CommentSection({ productId, currentUser, profile, onCountChange }: {
           <button onClick={() => setReplyTo(null)}><X className="w-3.5 h-3.5" /></button>
         </div>
       )}
-
       <div className="flex items-center gap-2">
         <div className="size-7 rounded-full overflow-hidden flex items-center justify-center shrink-0"
           style={{ background: 'var(--color-muted)' }}>
@@ -253,48 +244,114 @@ function CommentSection({ productId, currentUser, profile, onCountChange }: {
   );
 }
 
-// ── Media carousel ─────────────────────────────────────────────
-function MediaCarousel({ mediaUrls, imageUrl, name }: {
+function MediaCarousel({ mediaUrls, imageUrl, name }: { 
   mediaUrls?: string[], imageUrl?: string, name: string
 }) {
   const [current, setCurrent] = useState(0);
+
   const media = mediaUrls?.length ? mediaUrls : imageUrl ? [imageUrl] : [];
   if (!media.length) return null;
+
   const isVideo = (url: string) => url?.match(/\.(mp4|webm|mov|m4v)(\?.*)?$/i);
 
+  // Swipe support
+  const touchStartX = useRef<number>(0);
+  const touchEndX = useRef<number>(0);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    touchEndX.current = e.changedTouches[0].clientX;
+
+    const diff = touchStartX.current - touchEndX.current;
+
+    if (Math.abs(diff) > 50) {
+      if (diff > 0 && current < media.length - 1) {
+        setCurrent(c => c + 1);
+      }
+
+      if (diff < 0 && current > 0) {
+        setCurrent(c => c - 1);
+      }
+    }
+  };
+
   return (
-    <div className="relative w-full overflow-hidden bg-black">
+    <div
+      className="relative w-full overflow-hidden bg-black"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
       {media.map((url, i) => (
-        <div key={i} className={`transition-duration-300 ${i === current ? 'block' : 'hidden'}`}>
+        <div key={i} className={i === current ? 'block' : 'hidden'}>
           {isVideo(url) ? (
             i === current
-              ? <video src={url} className="w-full h-auto max-h-[80vh]" muted loop playsInline autoPlay />
+              ? (
+                <video
+                  src={url}
+                  className="w-full h-auto max-h-[80vh]"
+                  controls
+                  playsInline
+                  autoPlay
+                  loop
+                />
+              )
               : null
           ) : (
-            <img src={url} alt={`${name} ${i + 1}`} className="w-full h-auto" />
+            <img
+              src={url}
+              alt={`${name} ${i + 1}`}
+              className="w-full h-auto"
+            />
           )}
         </div>
       ))}
+
       {media.length > 1 && (
         <>
           {current > 0 && (
-            <button onClick={(e) => { e.stopPropagation(); setCurrent(c => c - 1); }}
-              className="absolute left-2 top-1/2 -translate-y-1/2 size-8 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white z-10">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setCurrent(c => c - 1);
+              }}
+              className="absolute left-2 top-1/2 -translate-y-1/2 size-8 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white z-10"
+            >
               <ChevronLeft className="w-4 h-4" />
             </button>
           )}
+
           {current < media.length - 1 && (
-            <button onClick={(e) => { e.stopPropagation(); setCurrent(c => c + 1); }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 size-8 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white z-10">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setCurrent(c => c + 1);
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 size-8 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white z-10"
+            >
               <ChevronRight className="w-4 h-4" />
             </button>
           )}
+
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1 z-10">
             {media.map((_, i) => (
-              <button key={i} onClick={(e) => { e.stopPropagation(); setCurrent(i); }}
-                className={`rounded-full transition-all ${i === current ? 'w-4 h-1.5 bg-white' : 'size-1.5 bg-white/50'}`} />
+              <button
+                key={i}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCurrent(i);
+                }}
+                className={`rounded-full transition-all ${
+                  i === current
+                    ? 'w-4 h-1.5 bg-white'
+                    : 'size-1.5 bg-white/50'
+                }`}
+              />
             ))}
           </div>
+
           <div className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-black/50 backdrop-blur-sm text-white text-xs font-medium z-10">
             {current + 1}/{media.length}
           </div>
@@ -304,22 +361,19 @@ function MediaCarousel({ mediaUrls, imageUrl, name }: {
   );
 }
 
-// ── Profile tap modal ──────────────────────────────────────────
 function ProfileModal({ vendor, onClose }: { vendor: any, onClose: () => void }) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4 pb-10"
       onClick={onClose}>
-      <div className="bg-white rounded-3xl overflow-hidden max-w-sm w-full"
+      <div className="bg-white rounded-3xl overflow-hidden w-full max-w-sm"
         onClick={e => e.stopPropagation()}>
-        {/* Cover */}
         <div className="h-24 relative" style={{ background: 'linear-gradient(135deg, var(--color-primary), #2a3a66)' }}>
           <button onClick={onClose} className="absolute top-3 right-3 size-8 rounded-full bg-black/30 flex items-center justify-center text-white">
             <X className="w-4 h-4" />
           </button>
         </div>
-        {/* Avatar */}
         <div className="px-5 -mt-10 pb-5">
-          <div className="size-20 rounded-2xl overflow-hidden border-4 border-white flex items-center justify-center mb-3"
+          <div className="size-20 rounded-full overflow-hidden border-4 border-white flex items-center justify-center mb-3"
             style={{ background: 'var(--color-muted)' }}>
             {vendor.photoUrl
               ? <Image src={vendor.photoUrl} alt={vendor.vendorName} width={80} height={80} className="object-cover w-full h-full" />
@@ -332,7 +386,7 @@ function ProfileModal({ vendor, onClose }: { vendor: any, onClose: () => void })
             )}
           </div>
           {vendor.isVerified && (
-            <p className="text-xs font-semibold mb-3" style={{ color: 'var(--color-accent)' }}>
+            <p className="text-xs font-semibold mb-4" style={{ color: 'var(--color-accent)' }}>
               {vendor.vendorRole === 'vendor' ? 'Verified Business' : 'Verified User'}
             </p>
           )}
@@ -347,76 +401,84 @@ function ProfileModal({ vendor, onClose }: { vendor: any, onClose: () => void })
   );
 }
 
-// ── Discover ad row ────────────────────────────────────────────
-function BrandsRow({ brands }: { brands: any[] }) {
+function BrandsRow({ brands, onTap }: { brands: any[], onTap: (vendor: any) => void }) {
   if (brands.length === 0) return null;
   return (
     <div className="py-4 bg-white border-b" style={{ borderColor: 'var(--color-border)' }}>
-      <p className="text-[10px] uppercase tracking-[0.2em] font-semibold text-[color:var(--color-muted-foreground)] px-4 mb-3">
+      <p className="text-[10px] uppercase tracking-[0.2em] font-semibold px-4 mb-3" style={{ color: '#F97316' }}>
         Top Brands
       </p>
       <div className="flex gap-3 overflow-x-auto no-scrollbar px-4 pb-1">
         {brands.map(brand => (
-          <Link key={brand.id} href={`/shop/${brand.id}`}
-            className="flex flex-col items-center gap-1.5 shrink-0">
-            <div className="size-14 rounded-full overflow-hidden flex items-center justify-center border"
+          <button key={brand.id} onClick={() => onTap({
+            vendorId: brand.id,
+            vendorName: brand.shopName || brand.name,
+            vendorRole: brand.role,
+            isVerified: brand.isVerified,
+            photoUrl: brand.photoUrl || null,
+          })}
+            className="flex flex-col items-center gap-2 shrink-0 w-20">
+            <div className="w-20 h-20 rounded-2xl overflow-hidden flex items-center justify-center border"
               style={{ background: 'var(--color-muted)', borderColor: 'var(--color-border)' }}>
               {brand.photoUrl
-                ? <Image src={brand.photoUrl} alt={brand.name} width={56} height={56} className="object-cover w-full h-full" />
-                : <UserIcon className="w-6 h-6 text-[color:var(--color-primary)]" />}
+                ? <Image src={brand.photoUrl} alt={brand.name} width={80} height={80} className="object-cover w-full h-full" />
+                : <UserIcon className="w-8 h-8 text-[color:var(--color-primary)]" />}
             </div>
-            <p className="text-[10px] font-semibold text-center max-w-[60px] truncate text-[color:var(--color-foreground)]">
-              {brand.shopName || brand.name}
-            </p>
-            {brand.isVerified && (
-              <BadgeCheck className="w-3 h-3 -mt-1" style={{ color: 'var(--color-accent)' }} />
-            )}
-          </Link>
+            <div className="flex items-center gap-1 w-full justify-center">
+              {brand.isVerified && (
+                <BadgeCheck className="w-3 h-3 shrink-0" style={{ color: 'var(--color-accent)' }} />
+              )}
+              <p className="text-[10px] font-semibold text-center text-[color:var(--color-foreground)] leading-tight">
+                {brand.shopName || brand.name}
+              </p>
+            </div>
+          </button>
         ))}
       </div>
     </div>
   );
 }
 
-function ProductsRow({ products }: { products: any[] }) {
-  if (products.length === 0) return null;
+function ProductsRow({ products, onTap }: { products: any[], onTap: (vendor: any) => void }) {
+  const withMedia = products.filter(p => p.mediaUrls?.length > 0 || p.imageUrl);
+  if (withMedia.length === 0) return null;
   return (
     <div className="py-4 bg-white border-b" style={{ borderColor: 'var(--color-border)' }}>
-      <p className="text-[10px] uppercase tracking-[0.2em] font-semibold text-[color:var(--color-muted-foreground)] px-4 mb-3">
+      <p className="text-[10px] uppercase tracking-[0.2em] font-semibold px-4 mb-3" style={{ color: '#F97316' }}>
         You might like
       </p>
       <div className="flex gap-3 overflow-x-auto no-scrollbar px-4 pb-1">
-        {products.map(p => {
+        {withMedia.map(p => {
           const mediaUrl = p.mediaUrls?.[0] || p.imageUrl;
           const isVideo = mediaUrl?.match(/\.(mp4|webm|mov)(\?.*)?$/i);
           return (
-            <Link key={p.id} href={`/shop/${p.vendorId}`}
-              className="shrink-0 w-40 rounded-2xl overflow-hidden border"
+            <button key={p.id} onClick={() => onTap({
+              vendorId: p.vendorId,
+              vendorName: p.vendorName,
+              vendorRole: p.vendorRole,
+              isVerified: p.isVerified,
+              photoUrl: p.vendorPhoto || null,
+            })}
+              className="shrink-0 w-40 rounded-2xl overflow-hidden border text-left"
               style={{ borderColor: 'var(--color-border)' }}>
-              {mediaUrl && (
-                <div className="w-40 h-40 overflow-hidden" style={{ background: 'var(--color-muted)' }}>
-                  {isVideo
-                    ? <video src={mediaUrl} className="w-full h-full object-cover" muted playsInline />
-                    : <img src={mediaUrl} alt={p.name || 'Product'} className="w-full h-full object-cover" />}
-                </div>
-              )}
-              <div className="p-2.5" style={{ background: 'white' }}>
+              <div className="w-40 h-40 overflow-hidden" style={{ background: 'var(--color-muted)' }}>
+                {isVideo
+                  ? <video src={mediaUrl} className="w-full h-full object-cover" muted playsInline />
+                  : <img src={mediaUrl} alt={p.name || 'Product'} className="w-full h-full object-cover" />}
+              </div>
+              <div className="p-2.5 bg-white">
                 {p.category && <p className="text-[9px] uppercase tracking-wider text-[color:var(--color-muted-foreground)] mb-0.5">{p.category}</p>}
                 {p.name && <p className="text-xs font-semibold line-clamp-1 text-[color:var(--color-foreground)]">{p.name}</p>}
-                {p.price && (
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--color-muted-foreground)' }}>
-                    ₦{Number(p.price).toLocaleString()}
-                  </p>
-                )}
+                {p.price && <p className="text-xs mt-0.5 text-[color:var(--color-muted-foreground)]">₦{Number(p.price).toLocaleString()}</p>}
               </div>
-            </Link>
+            </button>
           );
         })}
       </div>
     </div>
   );
 }
-// ── Post card ──────────────────────────────────────────────────
+
 function PostCard({ product, onDelete, canDelete, currentUser, profile, onProfileTap }: {
   product: any, onDelete: () => void, canDelete: boolean,
   currentUser: any, profile: any,
@@ -426,10 +488,12 @@ function PostCard({ product, onDelete, canDelete, currentUser, profile, onProfil
   const [liked, setLiked] = useState(product.likes?.includes(currentUser?.uid) || false);
   const [likesCount, setLikesCount] = useState(product.likes?.length || 0);
   const [commentCount, setCommentCount] = useState(0);
-useEffect(() => {
-  const q = query(collection(db, 'products', product.id, 'comments'));
-  return onSnapshot(q, snap => setCommentCount(snap.size));
-}, [product.id]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'products', product.id, 'comments'));
+    return onSnapshot(q, snap => setCommentCount(snap.size));
+  }, [product.id]);
+
   const hasMedia = (product.mediaUrls?.length > 0) || !!product.imageUrl;
   const hasPrice = product.price != null && product.price !== '';
   const hasName = !!product.name?.trim();
@@ -446,26 +510,13 @@ useEffect(() => {
       await updateDoc(ref, { likes: arrayUnion(currentUser.uid) });
       setLiked(true);
       setLikesCount((c: number) => c + 1);
-      // Notify post owner
-      if (product.vendorId !== currentUser.uid) {
-        await addDoc(collection(db, 'notifications'), {
-          userId: product.vendorId,
-          type: 'like',
-          title: `${profile?.name} liked your post`,
-          body: product.name || product.description?.slice(0, 60) || 'your post',
-          read: false,
-          createdAt: serverTimestamp(),
-        }).catch(() => {});
-      }
     }
   };
 
   return (
     <article className="bg-white border-b" style={{ borderColor: 'var(--color-border)' }}>
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-3">
-          {/* Tappable avatar */}
           <button
             onClick={() => onProfileTap({
               vendorId: product.vendorId,
@@ -515,12 +566,10 @@ useEffect(() => {
         )}
       </div>
 
-      {/* Media */}
       {hasMedia && (
         <MediaCarousel mediaUrls={product.mediaUrls} imageUrl={product.imageUrl} name={product.name || ''} />
       )}
 
-      {/* Body */}
       <div className={`px-4 ${isTextPost ? 'py-4' : 'pt-3 pb-2'}`}>
         {isTextPost ? (
           product.description && (
@@ -553,7 +602,6 @@ useEffect(() => {
         )}
       </div>
 
-      {/* Actions */}
       <div className="px-4 py-2 flex items-center gap-5">
         <button onClick={toggleLike}
           className="flex items-center gap-1.5 text-sm font-semibold transition-all"
@@ -581,7 +629,6 @@ useEffect(() => {
   );
 }
 
-// ── Main Marketplace ───────────────────────────────────────────
 export function Marketplace() {
   const { user, profile } = useAuthStore();
   const [products, setProducts] = useState<any[]>([]);
@@ -598,7 +645,6 @@ export function Marketplace() {
   const observerRef = useRef<IntersectionObserver | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  // Notifications
   useEffect(() => {
     if (!user) return;
     const q = query(
@@ -609,7 +655,6 @@ export function Marketplace() {
     return onSnapshot(q, snap => setNotifCount(snap.size));
   }, [user]);
 
-  // Brands for ad rows
   useEffect(() => {
     const q = query(collection(db, 'users'), where('isVerified', '==', true), limit(15));
     return onSnapshot(q, snap => {
@@ -617,17 +662,15 @@ export function Marketplace() {
     });
   }, []);
 
-  // Ad products (random sample)
   useEffect(() => {
     const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'), limit(20));
     getDocs(q).then(snap => {
-      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // Shuffle for variety
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .filter(p => (p.mediaUrls?.length ?? 0) > 0 || !!p.imageUrl);
       setAdProducts(all.sort(() => Math.random() - 0.5).slice(0, 10));
     });
   }, []);
 
-  // First page
   useEffect(() => {
     setLoading(true);
     setProducts([]);
@@ -684,31 +727,29 @@ export function Marketplace() {
     catch (e) { console.error(e); }
   };
 
-  // Interleave ad rows every AD_INTERVAL posts
   const renderFeed = () => {
-const items: React.JSX.Element[] = []
-  filteredProducts.forEach((product, index) => {
-    items.push(
-      <PostCard
-        key={product.id}
-        product={product}
-       canDelete={user?.uid === product.vendorId || (profile?.role as string) === 'admin'}
-        onDelete={() => setDeleteId(product.id)}
-        currentUser={user}
-        profile={profile}
-        onProfileTap={setViewingVendor}
-      />
-    );
-    if ((index + 1) % 5 === 0 && index < filteredProducts.length - 1) {
-      items.push(<ProductsRow key={`products-${index}`} products={adProducts} />);
-    }
-    if ((index + 1) % 8 === 0 && index < filteredProducts.length - 1) {
-      items.push(<BrandsRow key={`brands-${index}`} brands={brands} />);
-    }
-  });
-  return items;
-};
-      // Insert ad row after every AD_INTERVAL posts
+    const items: React.JSX.Element[] = [];
+    filteredProducts.forEach((product, index) => {
+      items.push(
+        <PostCard
+          key={product.id}
+          product={product}
+          canDelete={user?.uid === product.vendorId || (profile?.role as string) === 'admin'}
+          onDelete={() => setDeleteId(product.id)}
+          currentUser={user}
+          profile={profile}
+          onProfileTap={setViewingVendor}
+        />
+      );
+      if ((index + 1) % 5 === 0 && index < filteredProducts.length - 1) {
+        items.push(<ProductsRow key={`products-${index}`} products={adProducts} onTap={setViewingVendor} />);
+      }
+      if ((index + 1) % 8 === 0 && index < filteredProducts.length - 1) {
+        items.push(<BrandsRow key={`brands-${index}`} brands={brands} onTap={setViewingVendor} />);
+      }
+    });
+    return items;
+  };
 
   return (
     <div className="min-h-screen pb-32">
@@ -732,22 +773,6 @@ const items: React.JSX.Element[] = []
           </Link>
         </div>
 
-        {/* Hero card */}
-        <div className="rounded-[1.5rem] p-5 mb-5 relative overflow-hidden"
-          style={{ background: 'linear-gradient(135deg, var(--color-primary) 0%, #2a3a66 100%)' }}>
-          <div className="absolute -right-8 -top-8 size-32 rounded-full opacity-20" style={{ background: 'var(--color-accent)' }} />
-          <div className="absolute -right-16 -bottom-16 size-40 rounded-full opacity-10" style={{ background: 'var(--color-accent)' }} />
-          <div className="relative">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium uppercase tracking-wider mb-3"
-              style={{ background: 'rgba(255,255,255,0.15)', color: 'white' }}>
-              <Sparkles className="w-3 h-3" /> What's new
-            </span>
-            <h2 className="font-display text-white text-2xl leading-tight mb-1">Discover what your campus is selling.</h2>
-            <p className="text-white/70 text-sm">Fresh listings from student vendors, posted in real-time.</p>
-          </div>
-        </div>
-
-        {/* Categories */}
         <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-5 px-5">
           {CATEGORIES.map(cat => (
             <button key={cat} onClick={() => setActiveCategory(cat)}
@@ -813,7 +838,6 @@ const items: React.JSX.Element[] = []
         )}
       </main>
 
-      {/* Delete modal */}
       {deleteId && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4 pb-28">
           <div className="card p-6 max-w-sm w-full" style={{ boxShadow: 'var(--shadow-elevated)' }}>
@@ -828,7 +852,6 @@ const items: React.JSX.Element[] = []
         </div>
       )}
 
-      {/* Profile tap modal */}
       {viewingVendor && (
         <ProfileModal vendor={viewingVendor} onClose={() => setViewingVendor(null)} />
       )}
