@@ -62,7 +62,7 @@ export default function BrandsPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="      Search by name, shop or service..."
+            placeholder="Search by name, shop or service..."
             className="input-field pl-11 pr-10"
           />
           {search && (
