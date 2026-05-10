@@ -360,33 +360,44 @@ function MediaCarousel({ mediaUrls, imageUrl, name }: {
     </div>
   );
 }
-
 function ProfileModal({ vendor, onClose }: { vendor: any, onClose: () => void }) {
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4 pb-10"
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4 pb-28"
       onClick={onClose}>
       <div className="bg-white rounded-3xl overflow-hidden w-full max-w-sm"
         onClick={e => e.stopPropagation()}>
-        <div className="h-24 relative" style={{ background: 'linear-gradient(135deg, var(--color-primary), #2a3a66)' }}>
-          <button onClick={onClose} className="absolute top-3 right-3 size-8 rounded-full bg-black/30 flex items-center justify-center text-white">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="px-5 -mt-10 pb-5">
-          <div className="size-20 rounded-full overflow-hidden border-4 border-white flex items-center justify-center mb-3"
-            style={{ background: 'var(--color-muted)' }}>
-            {vendor.photoUrl
-              ? <Image src={vendor.photoUrl} alt={vendor.vendorName} width={80} height={80} className="object-cover w-full h-full" />
-              : <UserIcon className="w-8 h-8 text-[color:var(--color-primary)]" />}
+
+        {/* Card wrapper */}
+        <div className="relative">
+          {/* Blue banner */}
+          <div className="h-24 rounded-t-3xl" style={{ background: 'linear-gradient(135deg, var(--color-primary), #2a3a66)' }}>
+            <button onClick={onClose}
+              className="absolute top-3 right-3 size-8 rounded-full bg-black/30 flex items-center justify-center text-white z-10">
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <div className="flex items-center gap-1.5 mb-0.5">
+
+          {/* Avatar centered, overlapping banner */}
+          <div className="absolute left-1/2 -bottom-10 -translate-x-1/2">
+            <div className="size-20 rounded-full overflow-hidden border-4 border-white flex items-center justify-center"
+              style={{ background: 'var(--color-muted)' }}>
+              {vendor.photoUrl
+                ? <Image src={vendor.photoUrl} alt={vendor.vendorName} width={80} height={80} className="object-cover w-full h-full" />
+                : <UserIcon className="w-8 h-8 text-[color:var(--color-primary)]" />}
+            </div>
+          </div>
+        </div>
+
+        {/* Content below avatar */}
+        <div className="pt-14 px-5 pb-5">
+          <div className="flex items-center justify-center gap-1.5 mb-0.5">
             <p className="font-display text-xl">{vendor.vendorName}</p>
             {vendor.isVerified && (
               <BadgeCheck className="w-5 h-5 shrink-0" style={{ color: 'var(--color-accent)' }} />
             )}
           </div>
           {vendor.isVerified && (
-            <p className="text-xs font-semibold mb-4" style={{ color: 'var(--color-accent)' }}>
+            <p className="text-xs font-semibold text-center mb-4" style={{ color: 'var(--color-accent)' }}>
               {vendor.vendorRole === 'vendor' ? 'Verified Business' : 'Verified User'}
             </p>
           )}
@@ -396,12 +407,11 @@ function ProfileModal({ vendor, onClose }: { vendor: any, onClose: () => void })
             See Business <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
+
       </div>
     </div>
   );
-}
-
-function BrandsRow({ brands, onTap }: { brands: any[], onTap: (vendor: any) => void }) {
+}function BrandsRow({ brands, onTap }: { brands: any[], onTap: (vendor: any) => void }) {
   if (brands.length === 0) return null;
   return (
     <div className="py-4 bg-white border-b" style={{ borderColor: 'var(--color-border)' }}>
@@ -424,14 +434,14 @@ function BrandsRow({ brands, onTap }: { brands: any[], onTap: (vendor: any) => v
                 ? <Image src={brand.photoUrl} alt={brand.name} width={80} height={80} className="object-cover w-full h-full" />
                 : <UserIcon className="w-8 h-8 text-[color:var(--color-primary)]" />}
             </div>
-            <div className="flex items-center gap-1 w-full justify-center">
-              {brand.isVerified && (
-                <BadgeCheck className="w-3 h-3 shrink-0" style={{ color: 'var(--color-accent)' }} />
-              )}
-              <p className="text-[10px] font-semibold text-center text-[color:var(--color-foreground)] leading-tight">
-                {brand.shopName || brand.name}
-              </p>
-            </div>
+           <div className="flex items-center gap-1 w-full justify-center">
+ <p className="text-[10px] font-semibold text-center text-[color:var(--color-foreground)] leading-tight w-full truncate">
+  {brand.shopName || brand.name}
+</p>
+  {brand.isVerified && (
+    <BadgeCheck className="w-3 h-3 shrink-0" style={{ color: 'var(--color-accent)' }} />
+  )}
+</div>
           </button>
         ))}
       </div>
@@ -663,13 +673,17 @@ export function Marketplace() {
   }, []);
 
   useEffect(() => {
-    const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'), limit(20));
-    getDocs(q).then(snap => {
-      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        .filter(p => (p.mediaUrls?.length ?? 0) > 0 || !!p.imageUrl);
-      setAdProducts(all.sort(() => Math.random() - 0.5).slice(0, 10));
-    });
-  }, []);
+  const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'), limit(20));
+  getDocs(q).then(snap => {
+    const all = (snap.docs.map(d => ({ id: d.id, ...d.data() })) as Array<{
+      id: string;
+      mediaUrls?: string[];
+      imageUrl?: string;
+      [key: string]: unknown;
+    }>).filter(p => (p.mediaUrls?.length ?? 0) > 0 || !!p.imageUrl);
+    setAdProducts(all.sort(() => Math.random() - 0.5).slice(0, 10));
+  });
+}, []);
 
   useEffect(() => {
     setLoading(true);
