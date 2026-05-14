@@ -5,7 +5,7 @@ import {
   collection, query, orderBy, onSnapshot, doc, deleteDoc,
   limit, startAfter, getDocs, QueryDocumentSnapshot,
   updateDoc, arrayUnion, arrayRemove, addDoc, serverTimestamp,
-  where
+  where, increment
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuthStore } from '@/lib/store';
@@ -15,12 +15,112 @@ import {
   Trash2, TrendingUp, ChevronLeft, ChevronRight,
   Tag, BadgeCheck, Heart, MessageCircle,
   Send, Bell, X, CornerDownRight, User as UserIcon,
-  ArrowRight
+  ArrowRight, Play, ShoppingBag
 } from 'lucide-react';
 
 const CATEGORIES = ['All', 'Housing', 'Events', 'Electronics', 'Clothing', 'Services', 'Other'];
 const PAGE_SIZE = 10;
 
+interface Vendor {
+  vendorId: string;
+  vendorName: string;
+  vendorRole: string;
+  isVerified: boolean;
+  photoUrl: string | null;
+  contactLinks?: any[];
+}
+
+interface Product {
+  id: string;
+  name?: string;
+  description?: string;
+  price?: number | string;
+  category?: string;
+  mediaUrls?: string[];
+  imageUrl?: string;
+  vendorId: string;
+  vendorName: string;
+  vendorRole: string;
+  vendorPhoto?: string;
+  isVerified?: boolean;
+  likes?: string[];
+  commentCount?: number;
+  createdAt?: any;
+  contactLinks?: any[];
+}
+
+interface Brand {
+  id: string;
+  name?: string;
+  shopName?: string;
+  role?: string;
+  isVerified?: boolean;
+  photoUrl?: string;
+}
+
+interface Comment {
+  id: string;
+  text: string;
+  authorId: string;
+  authorName: string;
+  authorPhoto?: string | null;
+  likes?: string[];
+  parentId?: string | null;
+  createdAt?: any;
+  children?: Comment[];
+}
+
+// ── Order Modal ───────────────────────────────────────────────
+function OrderModal({ product, onClose }: {
+  product: { name?: string; price?: any; mediaUrl?: string; caption?: string; contactLinks?: any[]; vendorName?: string };
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4 pb-10"
+      onClick={onClose}>
+      <div className="bg-white rounded-3xl overflow-hidden w-full max-w-sm"
+        onClick={e => e.stopPropagation()}>
+        {product.mediaUrl && (
+          <div className="flex justify-center bg-black">
+            <img src={product.mediaUrl} alt={product.caption || product.name || 'Product'}
+              className="max-w-full h-auto block max-h-72 object-contain" />
+          </div>
+        )}
+        <div className="p-5">
+          {(product.caption || product.name) && (
+            <h3 className="font-display text-xl mb-1">{product.caption || product.name}</h3>
+          )}
+          {product.price && (
+            <p className="text-2xl font-display mb-1" style={{ color: 'var(--color-primary)' }}>
+              ₦{Number(product.price).toLocaleString()}
+            </p>
+          )}
+          {product.vendorName && (
+            <p className="text-xs text-[color:var(--color-muted-foreground)] mb-4">by {product.vendorName}</p>
+          )}
+          {product.contactLinks?.length > 0 ? (
+            <a href={product.contactLinks[0].url} target="_blank" rel="noopener noreferrer"
+              className="w-full mt-2 flex items-center justify-center gap-2 py-3.5 rounded-2xl font-semibold text-white transition-opacity hover:opacity-90"
+              style={{ background: 'var(--color-primary)' }}>
+              Contact to Order
+            </a>
+          ) : (
+            <p className="text-xs text-center text-[color:var(--color-muted-foreground)] mt-2">
+              No contact info available. Visit their shop page.
+            </p>
+          )}
+          <button onClick={onClose}
+            className="w-full mt-3 py-3 rounded-2xl text-sm font-semibold"
+            style={{ background: 'var(--color-muted)', color: 'var(--color-foreground)' }}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Helpers ───────────────────────────────────────────────────
 const renderWithLinks = (text: string) => {
   if (!text) return null;
   const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -40,32 +140,26 @@ const renderWithLinks = (text: string) => {
   });
 };
 
-function buildTree(comments: any[]): any[] {
-  const map: Record<string, any> = {};
-  const roots: any[] = [];
+function buildTree(comments: Comment[]): Comment[] {
+  const map: Record<string, Comment> = {};
+  const roots: Comment[] = [];
   comments.forEach(c => { map[c.id] = { ...c, children: [] }; });
   comments.forEach(c => {
-    if (c.parentId && map[c.parentId]) {
-      map[c.parentId].children.push(map[c.id]);
-    } else {
-      roots.push(map[c.id]);
-    }
+    if (c.parentId && map[c.parentId]) map[c.parentId].children!.push(map[c.id]);
+    else roots.push(map[c.id]);
   });
   return roots;
 }
 
-function CommentNode({
-  comment, depth, productId, currentUser, profile,
-  onReply, onDelete, onLike
-}: {
-  comment: any, depth: number, productId: string,
-  currentUser: any, profile: any,
-  onReply: (id: string, name: string) => void,
-  onDelete: (id: string, authorId: string) => void,
-  onLike: (id: string, likes: string[]) => void,
+// ── CommentNode ───────────────────────────────────────────────
+function CommentNode({ comment, depth, productId, currentUser, profile, onReply, onDelete, onLike }: {
+  comment: Comment; depth: number; productId: string;
+  currentUser: any; profile: any;
+  onReply: (id: string, name: string) => void;
+  onDelete: (id: string, authorId: string) => void;
+  onLike: (id: string, likes: string[]) => void;
 }) {
   const liked = comment.likes?.includes(currentUser?.uid);
-  const maxDepth = 4;
 
   return (
     <div style={{ marginLeft: depth > 0 ? Math.min(depth * 14, 42) : 0 }}>
@@ -73,11 +167,8 @@ function CommentNode({
         <div className="size-7 rounded-full overflow-hidden flex items-center justify-center shrink-0 mt-0.5"
           style={{ background: 'var(--color-muted)' }}>
           {comment.authorPhoto
-            ? <Image src={comment.authorPhoto} alt={comment.authorName}
-                width={28} height={28} className="object-cover w-full h-full" />
-            : <span className="text-[10px] font-bold text-[color:var(--color-primary)]">
-                {comment.authorName?.charAt(0)}
-              </span>}
+            ? <Image src={comment.authorPhoto} alt={comment.authorName} width={28} height={28} className="object-cover w-full h-full" />
+            : <span className="text-[10px] font-bold text-[color:var(--color-primary)]">{comment.authorName?.charAt(0)}</span>}
         </div>
         <div className="flex-1 min-w-0">
           <div className="rounded-2xl rounded-tl-sm px-3 py-2" style={{ background: 'var(--color-muted)' }}>
@@ -89,11 +180,10 @@ function CommentNode({
               className="flex items-center gap-1 text-[10px] font-semibold transition-all"
               style={{ color: liked ? '#EF4444' : 'var(--color-muted-foreground)' }}>
               <Heart className={`w-3 h-3 ${liked ? 'fill-current' : ''}`} />
-              {comment.likes?.length > 0 && comment.likes.length}
+              {(comment.likes?.length ?? 0) > 0 && comment.likes!.length}
             </button>
-            {depth < maxDepth && (
-              <button
-                onClick={() => onReply(comment.id, comment.authorName)}
+            {depth < 4 && (
+              <button onClick={() => onReply(comment.id, comment.authorName)}
                 className="text-[10px] font-semibold text-[color:var(--color-muted-foreground)]">
                 Reply
               </button>
@@ -107,7 +197,7 @@ function CommentNode({
           </div>
         </div>
       </div>
-      {comment.children?.map((child: any) => (
+      {comment.children?.map(child => (
         <CommentNode key={child.id} comment={child} depth={depth + 1}
           productId={productId} currentUser={currentUser} profile={profile}
           onReply={onReply} onDelete={onDelete} onLike={onLike} />
@@ -116,27 +206,25 @@ function CommentNode({
   );
 }
 
+// ── CommentSection ────────────────────────────────────────────
 function CommentSection({ productId, currentUser, profile, onCountChange }: {
-  productId: string, currentUser: any, profile: any,
-  onCountChange: (count: number) => void
+  productId: string; currentUser: any; profile: any;
+  onCountChange: (count: number) => void;
 }) {
-  const [comments, setComments] = useState<any[]>([]);
+  const [comments, setComments] = useState<Comment[]>([]);
   const [text, setText] = useState('');
-  const [replyTo, setReplyTo] = useState<{ id: string, name: string } | null>(null);
+  const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const q = query(
-      collection(db, 'products', productId, 'comments'),
-      orderBy('createdAt', 'asc')
-    );
+    const q = query(collection(db, 'products', productId, 'comments'), orderBy('createdAt', 'asc'));
     return onSnapshot(q, snap => {
-      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() } as Comment));
       setComments(all);
       onCountChange(all.length);
     });
-  }, [productId]);
+  }, [productId, onCountChange]);
 
   const submit = async () => {
     if (!text.trim() || !currentUser) return;
@@ -150,6 +238,10 @@ function CommentSection({ productId, currentUser, profile, onCountChange }: {
         createdAt: serverTimestamp(),
         likes: [],
         parentId: replyTo?.id || null,
+      });
+      // ✅ Fix: increment commentCount field instead of using a listener
+      await updateDoc(doc(db, 'products', productId), {
+        commentCount: increment(1)
       });
       if (replyTo) {
         const parent = comments.find(c => c.id === replyTo.id);
@@ -173,11 +265,9 @@ function CommentSection({ productId, currentUser, profile, onCountChange }: {
   const handleLike = async (commentId: string, likes: string[]) => {
     if (!currentUser) return;
     const ref = doc(db, 'products', productId, 'comments', commentId);
-    if (likes.includes(currentUser.uid)) {
-      await updateDoc(ref, { likes: arrayRemove(currentUser.uid) });
-    } else {
-      await updateDoc(ref, { likes: arrayUnion(currentUser.uid) });
-    }
+    likes.includes(currentUser.uid)
+      ? await updateDoc(ref, { likes: arrayRemove(currentUser.uid) })
+      : await updateDoc(ref, { likes: arrayUnion(currentUser.uid) });
   };
 
   const handleDelete = async (commentId: string, authorId: string) => {
@@ -185,6 +275,9 @@ function CommentSection({ productId, currentUser, profile, onCountChange }: {
     const children = comments.filter(c => c.parentId === commentId);
     await Promise.all(children.map(c => deleteDoc(doc(db, 'products', productId, 'comments', c.id))));
     await deleteDoc(doc(db, 'products', productId, 'comments', commentId));
+    await updateDoc(doc(db, 'products', productId), {
+      commentCount: increment(-(1 + children.length))
+    });
   };
 
   const tree = buildTree(comments);
@@ -198,21 +291,15 @@ function CommentSection({ productId, currentUser, profile, onCountChange }: {
         {tree.map(comment => (
           <CommentNode key={comment.id} comment={comment} depth={0}
             productId={productId} currentUser={currentUser} profile={profile}
-            onReply={(id, name) => {
-              setReplyTo({ id, name });
-              setTimeout(() => inputRef.current?.focus(), 100);
-            }}
-            onDelete={handleDelete}
-            onLike={handleLike} />
+            onReply={(id, name) => { setReplyTo({ id, name }); setTimeout(() => inputRef.current?.focus(), 100); }}
+            onDelete={handleDelete} onLike={handleLike} />
         ))}
       </div>
       {replyTo && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-xl mb-2 text-xs"
           style={{ background: 'var(--color-muted)' }}>
           <CornerDownRight className="w-3.5 h-3.5 shrink-0 text-[color:var(--color-muted-foreground)]" />
-          <span className="flex-1 text-[color:var(--color-muted-foreground)]">
-            Replying to <span className="font-semibold text-[color:var(--color-foreground)]">{replyTo.name}</span>
-          </span>
+          <span className="flex-1">Replying to <span className="font-semibold">{replyTo.name}</span></span>
           <button onClick={() => setReplyTo(null)}><X className="w-3.5 h-3.5" /></button>
         </div>
       )}
@@ -225,17 +312,12 @@ function CommentSection({ productId, currentUser, profile, onCountChange }: {
         </div>
         <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-full"
           style={{ background: 'var(--color-muted)' }}>
-          <input
-            ref={inputRef}
-            type="text"
-            value={text}
+          <input ref={inputRef} type="text" value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
             placeholder={replyTo ? `Reply to ${replyTo.name}...` : 'Write a comment...'}
-            className="flex-1 bg-transparent text-sm outline-none text-[color:var(--color-foreground)] placeholder:text-[color:var(--color-muted-foreground)]"
-          />
-          <button onClick={submit} disabled={submitting || !text.trim()}
-            style={{ color: 'var(--color-primary)' }}>
+            className="flex-1 bg-transparent text-sm outline-none text-[color:var(--color-foreground)] placeholder:text-[color:var(--color-muted-foreground)]" />
+          <button onClick={submit} disabled={submitting || !text.trim()} style={{ color: 'var(--color-primary)' }}>
             <Send className="w-4 h-4" />
           </button>
         </div>
@@ -244,115 +326,101 @@ function CommentSection({ productId, currentUser, profile, onCountChange }: {
   );
 }
 
-function MediaCarousel({ mediaUrls, imageUrl, name }: { 
-  mediaUrls?: string[], imageUrl?: string, name: string
-}) {
-  const [current, setCurrent] = useState(0);
+// ── SmartVideo ────────────────────────────────────────────────
+function SmartVideo({ src }: { src: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
 
-  const media = mediaUrls?.length ? mediaUrls : imageUrl ? [imageUrl] : [];
-  if (!media.length) return null;
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting && !el.paused) { el.pause(); setPlaying(false); }
+    }, { threshold: 0.3 });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
-  const isVideo = (url: string) => url?.match(/\.(mp4|webm|mov|m4v)(\?.*)?$/i);
-
-  // Swipe support
-  const touchStartX = useRef<number>(0);
-  const touchEndX = useRef<number>(0);
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    touchEndX.current = e.changedTouches[0].clientX;
-
-    const diff = touchStartX.current - touchEndX.current;
-
-    if (Math.abs(diff) > 50) {
-      if (diff > 0 && current < media.length - 1) {
-        setCurrent(c => c + 1);
-      }
-
-      if (diff < 0 && current > 0) {
-        setCurrent(c => c - 1);
-      }
-    }
+  const toggle = () => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (el.paused) { el.play(); setPlaying(true); }
+    else { el.pause(); setPlaying(false); }
   };
 
   return (
-    <div
-      className="relative w-full overflow-hidden bg-black"
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-    >
+    <div className="relative w-full" style={{ aspectRatio: '9/16' }} onClick={toggle}>
+      <video ref={videoRef} src={src} className="w-full h-full object-cover block"
+        playsInline loop preload="metadata" />
+      {!playing && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="size-14 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center">
+            <Play className="w-6 h-6 text-white fill-white ml-0.5" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── MediaCarousel ─────────────────────────────────────────────
+function MediaCarousel({ mediaUrls, imageUrl, name }: {
+  mediaUrls?: string[]; imageUrl?: string; name: string;
+}) {
+  const [current, setCurrent] = useState(0);
+  const touchStartX = useRef<number>(0);
+  const media = mediaUrls?.length ? mediaUrls : imageUrl ? [imageUrl] : [];
+  if (!media.length) return null;
+
+  const isVideo = (url: string) => !!url?.match(/\.(mp4|webm|mov|m4v)(\?.*)?$/i);
+
+  return (
+    <div className="relative w-full overflow-hidden" style={{ background: 'var(--color-muted)' }}
+      onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
+      onTouchEnd={e => {
+        const diff = touchStartX.current - e.changedTouches[0].clientX;
+        if (Math.abs(diff) > 50) {
+          if (diff > 0 && current < media.length - 1) setCurrent(c => c + 1);
+          if (diff < 0 && current > 0) setCurrent(c => c - 1);
+        }
+      }}>
       {media.map((url, i) => (
         <div key={i} className={i === current ? 'block' : 'hidden'}>
           {isVideo(url) ? (
-            i === current
-              ? (
-                <video
-                  src={url}
-                  className="w-full h-auto max-h-[80vh]"
-                  controls
-                  playsInline
-                  autoPlay
-                  loop
-                />
-              )
-              : null
+            i === current ? <SmartVideo src={url} /> : null
           ) : (
-            <img
-              src={url}
-              alt={`${name} ${i + 1}`}
-              className="w-full h-auto"
-            />
+            <div className="relative w-full" style={{ minHeight: 200 }}>
+              <Image src={url} alt={`${name} ${i + 1}`} width={800} height={800}
+                className="w-full h-auto object-contain"
+                sizes="(max-width: 768px) 100vw, 640px"
+                loading={i === 0 ? 'eager' : 'lazy'}
+                placeholder="blur"
+                blurDataURL="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" />
+            </div>
           )}
         </div>
       ))}
-
       {media.length > 1 && (
         <>
           {current > 0 && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setCurrent(c => c - 1);
-              }}
-              className="absolute left-2 top-1/2 -translate-y-1/2 size-8 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white z-10"
-            >
+            <button onClick={e => { e.stopPropagation(); setCurrent(c => c - 1); }}
+              className="absolute left-2 top-1/2 -translate-y-1/2 size-8 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white z-10">
               <ChevronLeft className="w-4 h-4" />
             </button>
           )}
-
           {current < media.length - 1 && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setCurrent(c => c + 1);
-              }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 size-8 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white z-10"
-            >
+            <button onClick={e => { e.stopPropagation(); setCurrent(c => c + 1); }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 size-8 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white z-10">
               <ChevronRight className="w-4 h-4" />
             </button>
           )}
-
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1 z-10">
             {media.map((_, i) => (
-              <button
-                key={i}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setCurrent(i);
-                }}
-                className={`rounded-full transition-all ${
-                  i === current
-                    ? 'w-4 h-1.5 bg-white'
-                    : 'size-1.5 bg-white/50'
-                }`}
-              />
+              <button key={i} onClick={e => { e.stopPropagation(); setCurrent(i); }}
+                className={`rounded-full transition-all ${i === current ? 'w-4 h-1.5 bg-white' : 'size-1.5 bg-white/50'}`} />
             ))}
           </div>
-
-          <div className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-black/50 backdrop-blur-sm text-white text-xs font-medium z-10">
+          <div className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-black/50 text-white text-xs font-medium z-10">
             {current + 1}/{media.length}
           </div>
         </>
@@ -360,24 +428,20 @@ function MediaCarousel({ mediaUrls, imageUrl, name }: {
     </div>
   );
 }
-function ProfileModal({ vendor, onClose }: { vendor: any, onClose: () => void }) {
+
+// ── ProfileModal ──────────────────────────────────────────────
+function ProfileModal({ vendor, onClose }: { vendor: Vendor; onClose: () => void }) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4 pb-28"
       onClick={onClose}>
-      <div className="bg-white rounded-3xl overflow-hidden w-full max-w-sm"
-        onClick={e => e.stopPropagation()}>
-
-        {/* Card wrapper */}
+      <div className="bg-white rounded-3xl overflow-hidden w-full max-w-sm" onClick={e => e.stopPropagation()}>
         <div className="relative">
-          {/* Blue banner */}
           <div className="h-24 rounded-t-3xl" style={{ background: 'linear-gradient(135deg, var(--color-primary), #2a3a66)' }}>
             <button onClick={onClose}
               className="absolute top-3 right-3 size-8 rounded-full bg-black/30 flex items-center justify-center text-white z-10">
               <X className="w-4 h-4" />
             </button>
           </div>
-
-          {/* Avatar centered, overlapping banner */}
           <div className="absolute left-1/2 -bottom-10 -translate-x-1/2">
             <div className="size-20 rounded-full overflow-hidden border-4 border-white flex items-center justify-center"
               style={{ background: 'var(--color-muted)' }}>
@@ -387,14 +451,10 @@ function ProfileModal({ vendor, onClose }: { vendor: any, onClose: () => void })
             </div>
           </div>
         </div>
-
-        {/* Content below avatar */}
         <div className="pt-14 px-5 pb-5">
           <div className="flex items-center justify-center gap-1.5 mb-0.5">
             <p className="font-display text-xl">{vendor.vendorName}</p>
-            {vendor.isVerified && (
-              <BadgeCheck className="w-5 h-5 shrink-0" style={{ color: 'var(--color-accent)' }} />
-            )}
+            {vendor.isVerified && <BadgeCheck className="w-5 h-5 shrink-0" style={{ color: 'var(--color-accent)' }} />}
           </div>
           {vendor.isVerified && (
             <p className="text-xs font-semibold text-center mb-4" style={{ color: 'var(--color-accent)' }}>
@@ -407,11 +467,13 @@ function ProfileModal({ vendor, onClose }: { vendor: any, onClose: () => void })
             See Business <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
-
       </div>
     </div>
   );
-}function BrandsRow({ brands, onTap }: { brands: any[], onTap: (vendor: any) => void }) {
+}
+
+// ── BrandsRow ─────────────────────────────────────────────────
+function BrandsRow({ brands, onTap }: { brands: Brand[]; onTap: (vendor: Vendor) => void }) {
   if (brands.length === 0) return null;
   return (
     <div className="py-4 bg-white border-b" style={{ borderColor: 'var(--color-border)' }}>
@@ -422,26 +484,23 @@ function ProfileModal({ vendor, onClose }: { vendor: any, onClose: () => void })
         {brands.map(brand => (
           <button key={brand.id} onClick={() => onTap({
             vendorId: brand.id,
-            vendorName: brand.shopName || brand.name,
-            vendorRole: brand.role,
-            isVerified: brand.isVerified,
+            vendorName: brand.shopName || brand.name || '',
+            vendorRole: brand.role || '',
+            isVerified: brand.isVerified || false,
             photoUrl: brand.photoUrl || null,
-          })}
-            className="flex flex-col items-center gap-2 shrink-0 w-20">
+          })} className="flex flex-col items-center gap-2 shrink-0 w-20">
             <div className="w-20 h-20 rounded-2xl overflow-hidden flex items-center justify-center border"
               style={{ background: 'var(--color-muted)', borderColor: 'var(--color-border)' }}>
               {brand.photoUrl
-                ? <Image src={brand.photoUrl} alt={brand.name} width={80} height={80} className="object-cover w-full h-full" />
+                ? <Image src={brand.photoUrl} alt={brand.name || ''} width={80} height={80} className="object-cover w-full h-full" />
                 : <UserIcon className="w-8 h-8 text-[color:var(--color-primary)]" />}
             </div>
-           <div className="flex items-center gap-1 w-full justify-center">
- <p className="text-[10px] font-semibold text-center text-[color:var(--color-foreground)] leading-tight w-full truncate">
-  {brand.shopName || brand.name}
-</p>
-  {brand.isVerified && (
-    <BadgeCheck className="w-3 h-3 shrink-0" style={{ color: 'var(--color-accent)' }} />
-  )}
-</div>
+            <div className="flex items-center gap-1 w-full justify-center">
+              <p className="text-[10px] font-semibold text-center leading-tight w-full truncate">
+                {brand.shopName || brand.name}
+              </p>
+              {brand.isVerified && <BadgeCheck className="w-3 h-3 shrink-0" style={{ color: 'var(--color-accent)' }} />}
+            </div>
           </button>
         ))}
       </div>
@@ -449,37 +508,49 @@ function ProfileModal({ vendor, onClose }: { vendor: any, onClose: () => void })
   );
 }
 
-function ProductsRow({ products, onTap }: { products: any[], onTap: (vendor: any) => void }) {
-  const withMedia = products.filter(p => p.mediaUrls?.length > 0 || p.imageUrl);
-  if (withMedia.length === 0) return null;
+// ── ProductsRow ───────────────────────────────────────────────
+// ✅ Fix: only show images, skip videos
+function ProductsRow({ products, onOrder }: {
+  products: Product[];
+  onOrder: (product: Product) => void;
+}) {
+  // Only show products with images (no videos) and that have a name or price
+  const withImages = products.filter(p => {
+    const urls = p.mediaUrls || (p.imageUrl ? [p.imageUrl] : []);
+    const hasImageOnly = urls.some(u => !u.match(/\.(mp4|webm|mov|m4v)(\?.*)?$/i));
+    return hasImageOnly;
+  });
+
+  if (withImages.length === 0) return null;
+
   return (
     <div className="py-4 bg-white border-b" style={{ borderColor: 'var(--color-border)' }}>
       <p className="text-[10px] uppercase tracking-[0.2em] font-semibold px-4 mb-3" style={{ color: '#F97316' }}>
         You might like
       </p>
       <div className="flex gap-3 overflow-x-auto no-scrollbar px-4 pb-1">
-        {withMedia.map(p => {
-          const mediaUrl = p.mediaUrls?.[0] || p.imageUrl;
-          const isVideo = mediaUrl?.match(/\.(mp4|webm|mov)(\?.*)?$/i);
+        {withImages.map(p => {
+          // Get first image URL (skip videos)
+          const allUrls = p.mediaUrls || (p.imageUrl ? [p.imageUrl] : []);
+          const imageUrl = allUrls.find(u => !u.match(/\.(mp4|webm|mov|m4v)(\?.*)?$/i));
+          if (!imageUrl) return null;
+
           return (
-            <button key={p.id} onClick={() => onTap({
-              vendorId: p.vendorId,
-              vendorName: p.vendorName,
-              vendorRole: p.vendorRole,
-              isVerified: p.isVerified,
-              photoUrl: p.vendorPhoto || null,
-            })}
+            <button key={p.id} onClick={() => onOrder(p)}
               className="shrink-0 w-40 rounded-2xl overflow-hidden border text-left"
               style={{ borderColor: 'var(--color-border)' }}>
-              <div className="w-40 h-40 overflow-hidden" style={{ background: 'var(--color-muted)' }}>
-                {isVideo
-                  ? <video src={mediaUrl} className="w-full h-full object-cover" muted playsInline />
-                  : <img src={mediaUrl} alt={p.name || 'Product'} className="w-full h-full object-cover" />}
+              <div className="w-40 h-40 overflow-hidden relative" style={{ background: 'var(--color-muted)' }}>
+                <Image src={imageUrl} alt={p.name || 'Product'} fill
+                  className="object-cover" sizes="160px" loading="lazy" />
               </div>
               <div className="p-2.5 bg-white">
                 {p.category && <p className="text-[9px] uppercase tracking-wider text-[color:var(--color-muted-foreground)] mb-0.5">{p.category}</p>}
-                {p.name && <p className="text-xs font-semibold line-clamp-1 text-[color:var(--color-foreground)]">{p.name}</p>}
-                {p.price && <p className="text-xs mt-0.5 text-[color:var(--color-muted-foreground)]">₦{Number(p.price).toLocaleString()}</p>}
+                {p.name && <p className="text-xs font-semibold line-clamp-1">{p.name}</p>}
+                {p.price && <p className="text-xs mt-0.5" style={{ color: 'var(--color-primary)' }}>₦{Number(p.price).toLocaleString()}</p>}
+                <div className="mt-2 py-1.5 rounded-xl text-[10px] font-semibold text-center text-white"
+                  style={{ background: 'var(--color-primary)' }}>
+                  Order
+                </div>
               </div>
             </button>
           );
@@ -489,25 +560,28 @@ function ProductsRow({ products, onTap }: { products: any[], onTap: (vendor: any
   );
 }
 
-function PostCard({ product, onDelete, canDelete, currentUser, profile, onProfileTap }: {
-  product: any, onDelete: () => void, canDelete: boolean,
-  currentUser: any, profile: any,
-  onProfileTap: (vendor: any) => void
+// ── PostCard ──────────────────────────────────────────────────
+function PostCard({ product, onDelete, canDelete, currentUser, profile, onProfileTap, onOrder }: {
+  product: Product; onDelete: () => void; canDelete: boolean;
+  currentUser: any; profile: any;
+  onProfileTap: (vendor: Vendor) => void;
+  onOrder: (product: Product) => void;
 }) {
   const [showComments, setShowComments] = useState(false);
   const [liked, setLiked] = useState(product.likes?.includes(currentUser?.uid) || false);
   const [likesCount, setLikesCount] = useState(product.likes?.length || 0);
-  const [commentCount, setCommentCount] = useState(0);
+  // ✅ Fix: read commentCount from document field, no extra listener
+  const [commentCount, setCommentCount] = useState(product.commentCount || 0);
 
-  useEffect(() => {
-    const q = query(collection(db, 'products', product.id, 'comments'));
-    return onSnapshot(q, snap => setCommentCount(snap.size));
-  }, [product.id]);
+  const handleCountChange = useCallback((count: number) => setCommentCount(count), []);
 
-  const hasMedia = (product.mediaUrls?.length > 0) || !!product.imageUrl;
+  const hasMedia = (product.mediaUrls?.length ?? 0) > 0 || !!product.imageUrl;
   const hasPrice = product.price != null && product.price !== '';
   const hasName = !!product.name?.trim();
+  const hasCategory = !!product.category;
   const isTextPost = !hasMedia && !hasPrice && !hasName;
+  // Show order button if post has name OR price OR category (it's a product listing)
+  const isProductPost = hasName || hasPrice || hasCategory;
 
   const toggleLike = async () => {
     if (!currentUser) return;
@@ -515,11 +589,21 @@ function PostCard({ product, onDelete, canDelete, currentUser, profile, onProfil
     if (liked) {
       await updateDoc(ref, { likes: arrayRemove(currentUser.uid) });
       setLiked(false);
-      setLikesCount((c: number) => Math.max(0, c - 1));
+      setLikesCount(c => Math.max(0, c - 1));
     } else {
       await updateDoc(ref, { likes: arrayUnion(currentUser.uid) });
       setLiked(true);
-      setLikesCount((c: number) => c + 1);
+      setLikesCount(c => c + 1);
+      if (product.vendorId !== currentUser.uid) {
+        await addDoc(collection(db, 'notifications'), {
+          userId: product.vendorId,
+          type: 'like',
+          title: `${profile?.name} liked your post`,
+          body: product.name || product.description?.slice(0, 60) || 'your post',
+          read: false,
+          createdAt: serverTimestamp(),
+        }).catch(() => {});
+      }
     }
   };
 
@@ -527,14 +611,13 @@ function PostCard({ product, onDelete, canDelete, currentUser, profile, onProfil
     <article className="bg-white border-b" style={{ borderColor: 'var(--color-border)' }}>
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => onProfileTap({
-              vendorId: product.vendorId,
-              vendorName: product.vendorName,
-              vendorRole: product.vendorRole,
-              isVerified: product.isVerified,
-              photoUrl: product.vendorPhoto || null,
-            })}
+          <button onClick={() => onProfileTap({
+            vendorId: product.vendorId,
+            vendorName: product.vendorName,
+            vendorRole: product.vendorRole,
+            isVerified: product.isVerified || false,
+            photoUrl: product.vendorPhoto || null,
+          })}
             className="size-9 rounded-full overflow-hidden flex items-center justify-center font-semibold text-sm text-white shrink-0 active:scale-95 transition-transform"
             style={{ background: 'linear-gradient(135deg, var(--color-primary), #2a3a66)' }}>
             {product.vendorPhoto
@@ -547,9 +630,7 @@ function PostCard({ product, onDelete, canDelete, currentUser, profile, onProfil
                 className="font-semibold text-sm text-[color:var(--color-foreground)] hover:underline underline-offset-2">
                 {product.vendorName}
               </Link>
-              {product.isVerified && (
-                <BadgeCheck className="w-4 h-4 shrink-0" style={{ color: 'var(--color-accent)' }} />
-              )}
+              {product.isVerified && <BadgeCheck className="w-4 h-4 shrink-0" style={{ color: 'var(--color-accent)' }} />}
             </div>
             <div className="flex items-center gap-1">
               {product.isVerified && (
@@ -569,16 +650,14 @@ function PostCard({ product, onDelete, canDelete, currentUser, profile, onProfil
         </div>
         {canDelete && (
           <button onClick={onDelete}
-            className="size-8 rounded-full flex items-center justify-center transition-all"
+            className="size-8 rounded-full flex items-center justify-center"
             style={{ color: 'var(--color-danger)', background: 'var(--color-danger-soft)' }}>
             <Trash2 className="w-4 h-4" />
           </button>
         )}
       </div>
 
-      {hasMedia && (
-        <MediaCarousel mediaUrls={product.mediaUrls} imageUrl={product.imageUrl} name={product.name || ''} />
-      )}
+      {hasMedia && <MediaCarousel mediaUrls={product.mediaUrls} imageUrl={product.imageUrl} name={product.name || ''} />}
 
       <div className={`px-4 ${isTextPost ? 'py-4' : 'pt-3 pb-2'}`}>
         {isTextPost ? (
@@ -612,11 +691,12 @@ function PostCard({ product, onDelete, canDelete, currentUser, profile, onProfil
         )}
       </div>
 
-      <div className="px-4 py-2 flex items-center gap-5">
+      {/* Actions */}
+      <div className="px-4 py-2 flex items-center gap-4">
         <button onClick={toggleLike}
           className="flex items-center gap-1.5 text-sm font-semibold transition-all"
           style={{ color: liked ? '#EF4444' : 'var(--color-muted-foreground)' }}>
-          <Heart className={`w-5 h-5 transition-all ${liked ? 'fill-current scale-110' : ''}`} />
+          <Heart className={`w-5 h-5 ${liked ? 'fill-current scale-110' : ''}`} />
           {likesCount > 0 && <span>{likesCount}</span>}
         </button>
         <button onClick={() => setShowComments(v => !v)}
@@ -625,65 +705,64 @@ function PostCard({ product, onDelete, canDelete, currentUser, profile, onProfil
           <MessageCircle className="w-5 h-5" />
           {commentCount > 0 && <span>{commentCount}</span>}
         </button>
+        {/* ✅ Order button — only on product posts */}
+        {isProductPost && (
+          <button onClick={() => onOrder(product)}
+            className="ml-auto flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold text-white transition-opacity hover:opacity-90"
+            style={{ background: 'var(--color-primary)' }}>
+            <ShoppingBag className="w-3.5 h-3.5" />
+            Order
+          </button>
+        )}
       </div>
 
       {showComments && (
-        <CommentSection
-          productId={product.id}
-          currentUser={currentUser}
-          profile={profile}
-          onCountChange={setCommentCount}
-        />
+        <CommentSection productId={product.id} currentUser={currentUser}
+          profile={profile} onCountChange={handleCountChange} />
       )}
     </article>
   );
 }
 
+// ── Marketplace ───────────────────────────────────────────────
 export function Marketplace() {
   const { user, profile } = useAuthStore();
-  const [products, setProducts] = useState<any[]>([]);
-  const [brands, setBrands] = useState<any[]>([]);
-  const [adProducts, setAdProducts] = useState<any[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [adProducts, setAdProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [activeCategory, setActiveCategory] = useState('All');
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [notifCount, setNotifCount] = useState(0);
-  const [viewingVendor, setViewingVendor] = useState<any | null>(null);
+  const [viewingVendor, setViewingVendor] = useState<Vendor | null>(null);
+  const [orderProduct, setOrderProduct] = useState<Product | null>(null);
   const lastDocRef = useRef<QueryDocumentSnapshot | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    if (!user) return;
-    const q = query(
-      collection(db, 'notifications'),
-      where('userId', '==', user.uid),
-      where('read', '==', false)
-    );
-    return onSnapshot(q, snap => setNotifCount(snap.size));
-  }, [user]);
+  // ✅ Fix: read unreadCount from profile — zero extra reads
+  const notifCount = (profile as any)?.unreadCount || 0;
 
+  // ✅ Fix: brands uses getDocs not onSnapshot
   useEffect(() => {
     const q = query(collection(db, 'users'), where('isVerified', '==', true), limit(15));
-    return onSnapshot(q, snap => {
-      setBrands(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    getDocs(q).then(snap => {
+      setBrands(snap.docs.map(d => ({ id: d.id, ...d.data() } as Brand)));
     });
   }, []);
 
   useEffect(() => {
-  const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'), limit(20));
-  getDocs(q).then(snap => {
-    const all = (snap.docs.map(d => ({ id: d.id, ...d.data() })) as Array<{
-      id: string;
-      mediaUrls?: string[];
-      imageUrl?: string;
-      [key: string]: unknown;
-    }>).filter(p => (p.mediaUrls?.length ?? 0) > 0 || !!p.imageUrl);
-    setAdProducts(all.sort(() => Math.random() - 0.5).slice(0, 10));
-  });
-}, []);
+    const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'), limit(20));
+    getDocs(q).then(snap => {
+      const all = (snap.docs.map(d => ({ id: d.id, ...d.data() })) as Product[])
+        .filter(p => {
+          const urls = p.mediaUrls || (p.imageUrl ? [p.imageUrl] : []);
+          return urls.some(u => !u.match(/\.(mp4|webm|mov|m4v)(\?.*)?$/i));
+        });
+      setAdProducts(all.sort(() => Math.random() - 0.5).slice(0, 10));
+    });
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -692,7 +771,7 @@ export function Marketplace() {
     setHasMore(true);
     const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'), limit(PAGE_SIZE));
     const unsub = onSnapshot(q, snap => {
-      setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Product)));
       lastDocRef.current = snap.docs[snap.docs.length - 1] || null;
       setHasMore(snap.docs.length === PAGE_SIZE);
       setLoading(false);
@@ -704,14 +783,10 @@ export function Marketplace() {
     if (!hasMore || loadingMore || !lastDocRef.current) return;
     setLoadingMore(true);
     try {
-      const q = query(
-        collection(db, 'products'),
-        orderBy('createdAt', 'desc'),
-        startAfter(lastDocRef.current),
-        limit(PAGE_SIZE)
-      );
+      const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'),
+        startAfter(lastDocRef.current), limit(PAGE_SIZE));
       const snap = await getDocs(q);
-      const more = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const more = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
       setProducts(prev => {
         const ids = new Set(prev.map(p => p.id));
         return [...prev, ...more.filter(p => !ids.has(p.id))];
@@ -732,8 +807,7 @@ export function Marketplace() {
   }, [loadMore]);
 
   const filteredProducts = activeCategory === 'All'
-    ? products
-    : products.filter(p => p.category === activeCategory);
+    ? products : products.filter(p => p.category === activeCategory);
 
   const confirmDelete = async () => {
     if (!deleteId) return;
@@ -745,18 +819,16 @@ export function Marketplace() {
     const items: React.JSX.Element[] = [];
     filteredProducts.forEach((product, index) => {
       items.push(
-        <PostCard
-          key={product.id}
-          product={product}
+        <PostCard key={product.id} product={product}
           canDelete={user?.uid === product.vendorId || (profile?.role as string) === 'admin'}
           onDelete={() => setDeleteId(product.id)}
-          currentUser={user}
-          profile={profile}
+          currentUser={user} profile={profile}
           onProfileTap={setViewingVendor}
+          onOrder={setOrderProduct}
         />
       );
       if ((index + 1) % 5 === 0 && index < filteredProducts.length - 1) {
-        items.push(<ProductsRow key={`products-${index}`} products={adProducts} onTap={setViewingVendor} />);
+        items.push(<ProductsRow key={`products-${index}`} products={adProducts} onOrder={setOrderProduct} />);
       }
       if ((index + 1) % 8 === 0 && index < filteredProducts.length - 1) {
         items.push(<BrandsRow key={`brands-${index}`} brands={brands} onTap={setViewingVendor} />);
@@ -771,14 +843,12 @@ export function Marketplace() {
         <div className="flex justify-between items-start mb-5">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-muted-foreground)] mb-1.5">Welcome back</p>
-            <h1 className="font-display text-3xl leading-none text-[color:var(--color-foreground)]">
-              {profile?.name?.split(' ')[0] || 'Hello'}.
-            </h1>
+            <h1 className="font-display text-3xl leading-none">{profile?.name?.split(' ')[0] || 'Hello'}.</h1>
           </div>
           <Link href="/notifications"
             className="relative size-11 rounded-full flex items-center justify-center"
             style={{ background: 'var(--color-muted)' }}>
-            <Bell className="w-5 h-5 text-[color:var(--color-foreground)]" />
+            <Bell className="w-5 h-5" />
             {notifCount > 0 && (
               <span className="absolute -top-0.5 -right-0.5 size-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
                 {notifCount > 9 ? '9+' : notifCount}
@@ -786,12 +856,11 @@ export function Marketplace() {
             )}
           </Link>
         </div>
-
         <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-5 px-5">
           {CATEGORIES.map(cat => (
             <button key={cat} onClick={() => setActiveCategory(cat)}
               className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
-                activeCategory === cat ? 'text-white shadow-md' : 'bg-white text-[color:var(--color-foreground)] border'
+                activeCategory === cat ? 'text-white shadow-md' : 'bg-white border'
               }`}
               style={activeCategory === cat ? { background: 'var(--color-primary)' } : { borderColor: 'var(--color-border)' }}>
               {cat}
@@ -854,7 +923,7 @@ export function Marketplace() {
 
       {deleteId && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4 pb-28">
-          <div className="card p-6 max-w-sm w-full" style={{ boxShadow: 'var(--shadow-elevated)' }}>
+          <div className="card p-6 max-w-sm w-full">
             <h3 className="font-display text-2xl mb-1">Delete listing?</h3>
             <p className="text-sm text-[color:var(--color-muted-foreground)] mb-6">This action cannot be undone.</p>
             <div className="flex gap-3">
@@ -866,8 +935,23 @@ export function Marketplace() {
         </div>
       )}
 
-      {viewingVendor && (
-        <ProfileModal vendor={viewingVendor} onClose={() => setViewingVendor(null)} />
+      {viewingVendor && <ProfileModal vendor={viewingVendor} onClose={() => setViewingVendor(null)} />}
+
+      {orderProduct && (
+        <OrderModal
+          product={{
+            name: orderProduct.name,
+            price: orderProduct.price,
+            mediaUrl: (() => {
+              const urls = orderProduct.mediaUrls || (orderProduct.imageUrl ? [orderProduct.imageUrl] : []);
+              return urls.find(u => !u.match(/\.(mp4|webm|mov|m4v)(\?.*)?$/i));
+            })(),
+            caption: orderProduct.name,
+            contactLinks: orderProduct.contactLinks,
+            vendorName: orderProduct.vendorName,
+          }}
+          onClose={() => setOrderProduct(null)}
+        />
       )}
     </div>
   );
